@@ -1,4 +1,5 @@
 package com.example.stayfinder.backend.security;
+
 import com.example.stayfinder.backend.util.JwtUtil;
 import jakarta.servlet.*;
 import jakarta.servlet.http.*;
@@ -33,24 +34,26 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         String token = authHeader.substring(7);
 
-        if (!jwtUtil.isTokenValid(token)) {
-            filterChain.doFilter(request, response);
-            return;
+        try {
+            if (jwtUtil.isTokenValid(token)) {
+                String email = jwtUtil.extractEmail(token);
+                String role  = jwtUtil.extractRole(token);
+
+                UsernamePasswordAuthenticationToken auth =
+                        new UsernamePasswordAuthenticationToken(
+                                email,
+                                null,
+                                List.of(new SimpleGrantedAuthority("ROLE_" + role))
+                        );
+                auth.setDetails(new WebAuthenticationDetailsSource()
+                        .buildDetails(request));
+
+                SecurityContextHolder.getContext().setAuthentication(auth);
+            }
+        } catch (Exception e) {
+            SecurityContextHolder.clearContext();
         }
 
-        String email = jwtUtil.extractEmail(token);
-        String role  = jwtUtil.extractRole(token);
-
-        UsernamePasswordAuthenticationToken auth =
-                new UsernamePasswordAuthenticationToken(
-                        email,
-                        null,
-                        List.of(new SimpleGrantedAuthority("ROLE_" + role))
-                );
-        auth.setDetails(new WebAuthenticationDetailsSource()
-                .buildDetails(request));
-
-        SecurityContextHolder.getContext().setAuthentication(auth);
         filterChain.doFilter(request, response);
     }
 }
