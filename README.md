@@ -55,9 +55,7 @@ The focus is on solving a specific set of backend problems correctly:
 ### System Overview <p align="center"> <img src="./docs/stayfinder_architecture.png" alt="StayFinder Architecture" width="100%"> </p>
 
 
-## Class Diagram
 
-<p align="center"> <img src="./docs/stayfinder_uml_class_diagram.svg" alt="StayFinder UML Class Diagram" width="100%"> </p>
 ## Tech Stack
 
 ### Backend
