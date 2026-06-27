@@ -2,7 +2,7 @@
 
 # 🏠 StayFinder
 
-**A production-style property rental backend built to explore real-world engineering problems —
+**A property rental backend built to explore real-world engineering problems —
 concurrent bookings, distributed caching, full-text search, and async event handling.**
 
 ![Java](https://img.shields.io/badge/Java-21-FF6B35?style=flat-square&logo=openjdk&logoColor=white)
@@ -401,68 +401,6 @@ Kibana: `http://localhost:5601`
 
 ---
 
-## API Endpoints
-
-| Method | Endpoint | Auth | Role |
-|--------|----------|------|------|
-| POST | `/api/users/register` | No | — |
-| POST | `/api/auth/login` | No | — |
-| GET | `/api/users/{id}` | Yes | Any |
-| POST | `/api/properties` | Yes | HOST |
-| GET | `/api/properties/{id}` | Yes | Any |
-| PUT | `/api/properties/{id}` | Yes | HOST |
-| DELETE | `/api/properties/{id}` | Yes | HOST |
-| POST | `/api/properties/{id}/images` | Yes | HOST |
-| POST | `/api/bookings/hold` | Yes | GUEST |
-| POST | `/api/bookings` | Yes | GUEST |
-| PATCH | `/api/bookings/{id}/confirm` | Yes | HOST |
-| PATCH | `/api/bookings/{id}/cancel` | Yes | HOST / GUEST |
-| GET | `/api/bookings/availability` | Yes | Any |
-| GET | `/api/search` | Yes | Any |
-| POST | `/api/reviews` | Yes | GUEST |
-| GET | `/api/reviews/property/{id}/rating` | Yes | Any |
-| GET | `/actuator/health` | No | — |
-
-### Sample Requests
-
-```bash
-# Register
-curl -X POST http://localhost:8080/api/users/register \
-  -H "Content-Type: application/json" \
-  -d '{"name":"Falak Khan","email":"falak@example.com","password":"secret123","role":"HOST"}'
-
-# Login
-curl -X POST http://localhost:8080/api/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{"email":"falak@example.com","password":"secret123"}'
-
-# Search
-curl -X GET "http://localhost:8080/api/search?city=Goa&minPrice=2000&maxPrice=8000&minGuests=2&keyword=beach" \
-  -H "Authorization: Bearer <token>"
-
-# Book
-curl -X POST http://localhost:8080/api/bookings \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <token>" \
-  -d '{"propertyId":"<uuid>","guestId":"<uuid>","checkIn":"2026-09-01","checkOut":"2026-09-05"}'
-
-# Upload image
-curl -X POST http://localhost:8080/api/properties/<id>/images \
-  -H "Authorization: Bearer <token>" \
-  -F "file=@/path/to/image.jpg"
-```
-
----
-
-## What I Would Do Differently
-
-- **Outbox pattern** for cache + ES sync instead of in-process eviction — more reliable under partial failures
-- **Kafka** instead of Spring Events for booking notifications — enables replay, fan-out, and independent consumer scaling
-- **Geo-distance search** in Elasticsearch for "properties near me" queries
-- **Idempotency keys** on booking creation to safely handle client retries
-- **Kubernetes + HPA** for autoscaling the booking service under traffic spikes
-
----
 
 ## Authors
 
