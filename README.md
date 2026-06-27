@@ -2,8 +2,7 @@
 
 # 🏠 StayFinder
 
-**A property rental backend built to explore real-world engineering problems —
-concurrent bookings, distributed caching, full-text search, and async event handling.**
+**A property rental backend**
 
 ![Java](https://img.shields.io/badge/Java-21-FF6B35?style=flat-square&logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5-6DB33F?style=flat-square&logo=springboot&logoColor=white)
