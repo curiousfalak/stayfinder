@@ -159,14 +159,3 @@ Kibana: `http://localhost:5601`
 ---
 
 
-## Authors
-
-**Falak Khan** · [GitHub](https://github.com/falak-khan) · [LinkedIn](#)
-
-**Fiza Khan** · [GitHub](https://github.com/fiza-khan) · [LinkedIn](#)
-
----
-
-<div align="center">
-<sub>Built with Spring Boot · PostgreSQL · Redis · Elasticsearch · MinIO</sub>
-</div>
