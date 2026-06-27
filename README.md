@@ -167,17 +167,22 @@ Guest                  API                  Redis              PostgreSQL
 
 ## Preventing Double Booking
 
-The booking hold uses a **two-layer concurrency guard**:
+Two-layer concurrency guard — neither layer alone is sufficient.
 
-**Layer 1 — Redis distributed hold**
-`SETNX hold:{propertyId}:{checkIn}:{checkOut}` is atomic. Only the first caller gets `OK`. Any concurrent request for the same key gets `0` and is rejected immediately. The key has a 30-second TTL, so stale holds expire automatically if the guest abandons the flow.
+**Layer 1 — Redis distributed hold (`SETNX`)**
+- Guest calls `POST /bookings/hold` before confirming a booking.
+- `SETNX hold:{propertyId}:{checkIn}:{checkOut}` is atomic — only one caller gets `OK`.
+- Any concurrent request for the same key gets `0` and receives a `409 Conflict` immediately.
+- Key has a 30-second TTL — stale holds expire automatically if the guest abandons the flow.
 
-**Layer 2 — Optimistic locking on write**
-Even if two requests somehow bypass Redis (e.g. hold expires mid-request), the `Booking` entity carries a `@Version` field. The second concurrent write hits an `OptimisticLockException` at the database transaction level, which rolls back cleanly.
+**Layer 2 — Optimistic locking on write (`@Version`)**
+- Even if two requests bypass Redis (e.g. hold expires mid-request), the `Booking` entity carries a `@Version` field.
+- The second concurrent write throws `OptimisticLockException` at the database transaction level and rolls back cleanly.
+- No explicit database lock is held, so read throughput is not affected.
 
 ```
-Request A ──▶ SETNX hold key ──▶ OK  ──▶ INSERT booking ──▶ DEL hold ──▶ ✅ Confirmed
-Request B ──▶ SETNX hold key ──▶ 0   ──▶ 409 Conflict                   ──▶ ❌ Rejected
+Request A ──▶ SETNX ──▶ OK  ──▶ overlap check ──▶ INSERT ──▶ DEL hold ──▶ ✅ Confirmed
+Request B ──▶ SETNX ──▶ 0   ──▶ 409 Conflict                             ──▶ ❌ Rejected
 ```
 
 ---
@@ -186,43 +191,42 @@ Request B ──▶ SETNX hold key ──▶ 0   ──▶ 409 Conflict         
 
 ### 1. Cache Invalidation Across Three Stores
 
-**Problem:** Property data lives in PostgreSQL, is cached in Redis, and is indexed in Elasticsearch. A property update (price change, new image) needs to be reflected in all three consistently. A naive approach leaves Redis serving stale data and Elasticsearch returning outdated documents in search results.
-
-**Solution:** Writes to PostgreSQL are always followed by an explicit Redis cache eviction (`@CacheEvict`) and a synchronous Elasticsearch index update within the same service method. This is not a distributed transaction — if the ES update fails, the data is eventually corrected on the next read, which re-indexes the document. For the current scale this is acceptable; a production system would use an outbox pattern or CDC (Debezium).
-
----
-
-### 2. Lazy Loading Breaking Redis Serialisation
-
-**Problem:** When serialising a `Property` entity to JSON for the Redis cache, Jackson attempted to traverse the `imageUrls` collection. Because this was a Hibernate proxy backed by a closed `EntityManager` session, it threw a `LazyInitializationException` at cache write time — not at query time, making the stack trace misleading.
-
-**Solution:** `@Transactional(readOnly = true)` on the service method keeps the session open through serialisation. The lazy collection is explicitly initialised into a plain `ArrayList` before the method returns, so the object stored in Redis has no Hibernate proxy references. Jackson is also configured with `activateDefaultTyping` so it stores the concrete class name alongside the JSON for correct deserialisation.
+- **Problem:** Property data lives in PostgreSQL, is cached in Redis, and is indexed in Elasticsearch. A single property update — price change, new image — has to be reflected consistently in all three. A partial update leaves Redis serving stale data while Elasticsearch returns outdated documents in search results.
+- **Solution:** Every write to PostgreSQL is followed by an explicit `@CacheEvict` on the Redis key and a synchronous ES index update within the same service method.
+- **Trade-off:** This is not a distributed transaction. If the ES update fails after the DB write succeeds, data is eventually corrected on the next read by re-indexing the document. Acceptable at this scale; a production system would use an outbox pattern or CDC via Debezium.
 
 ---
 
-### 3. Elasticsearch Query API Migration
+### 2. Hibernate Lazy Proxy Breaking Redis Serialisation
 
-**Problem:** Elasticsearch's Java client replaced the old `RestHighLevelClient` with a new typed client between 7.x and 8.x. The old fluent chaining API (`QueryBuilders.range().field("pricePerNight").gte(min)`) does not compile against the 8.x client, which uses lambda builders exclusively.
+- **Problem:** Caching a `Property` entity in Redis triggers Jackson serialisation. Jackson attempts to traverse the `imageUrls` collection, which is a Hibernate proxy — but by that point the `EntityManager` session is already closed. This throws `LazyInitializationException` at cache-write time, not at query time, making the stack trace misleading.
+- **Solution:**
+  - Added `@Transactional(readOnly = true)` on the service read method to keep the session open through serialisation.
+  - Explicitly copied the lazy collection into a plain `ArrayList` before the method returns — no Hibernate proxy references survive into the cached object.
+  - Configured Jackson with `activateDefaultTyping` so Redis stores the concrete class name alongside the JSON, enabling correct deserialisation on cache hit.
 
-**Solution:** All queries were rewritten to the lambda builder pattern:
+---
+
+### 3. Elasticsearch 8.x Query API — Silent Result Failures
+
+- **Problem:** Elasticsearch replaced `RestHighLevelClient` with a new strongly-typed Java client in 8.x. The old fluent chaining API does not compile. Worse — using the generic range builder on a numeric field does not throw a compile-time or runtime error; it just returns 0 results silently, making it very hard to diagnose.
+- **Root cause:** The generic range builder sends an untyped DSL fragment that Elasticsearch accepts syntactically but does not match any numeric mapping at query time.
+- **Solution:** Migrated all queries to the lambda builder pattern and switched to the number-typed range explicitly:
 
 ```java
-// Before (7.x — does not compile on 8.x)
+// Generic form — silently returns 0 results on numeric fields
 Query.of(q -> q.range(r -> r.field("pricePerNight").gte(JsonData.of(min))))
 
-// After (8.x lambda builder)
+// Correct — number-typed range builder
 Query.of(q -> q.range(r -> r.number(n -> n.field("pricePerNight").gte(min.doubleValue()))))
 ```
 
-The number-typed range builder is required for numeric fields; using the generic form produces a type mismatch at the Elasticsearch query DSL level, not at compile time — so it fails silently with 0 results.
-
 ---
 
-### 4. Windows JVM Timezone Rejected by PostgreSQL 16
+### 4. Windows JVM Timezone Alias Rejected by PostgreSQL 16
 
-**Problem:** PostgreSQL 16 dropped support for deprecated IANA timezone aliases. The Windows JVM resolves `user.timezone` to `Asia/Calcutta`, which PostgreSQL 16 no longer accepts, causing the JDBC connection to fail at startup with `invalid value for parameter "TimeZone": "Asia/Calcutta"`.
-
-**Solution:** Override the default timezone programmatically before the Spring context initialises:
+- **Problem:** PostgreSQL 16 dropped support for deprecated IANA timezone aliases. On Windows, the JVM resolves `user.timezone` to `Asia/Calcutta` — a deprecated alias — causing the JDBC connection pool to fail at startup with `invalid value for parameter "TimeZone": "Asia/Calcutta"`. The error appears before the Spring context loads, so it looks like an infrastructure failure rather than a configuration issue.
+- **Solution:** Override the JVM default timezone before the Spring context initialises:
 
 ```java
 @SpringBootApplication
@@ -234,30 +238,50 @@ public class StayfinderApplication {
 }
 ```
 
-This sets `Asia/Kolkata` (the current IANA canonical name) at JVM startup, before any JDBC connection is attempted.
+- **Why this works:** `Asia/Kolkata` is the current canonical IANA name. Setting it before `SpringApplication.run` ensures JDBC picks it up before opening any connections.
 
 ---
 
 ## Tech Stack
 
+### Backend
+
 | Technology | Role |
 |------------|------|
 | Java 21 | Language |
 | Spring Boot 3.5 | Application framework |
-| Spring Security + JJWT 0.12 | Stateless JWT auth, role-based access |
-| Spring Data JPA + Hibernate 6 | ORM and database access |
-| PostgreSQL 16 | Primary relational store |
-| Redis 7 + Spring Data Redis | Response cache + distributed booking hold |
-| Elasticsearch 8.13 | Full-text and filtered property search |
-| Kibana 8.13 | Analytics dashboard over ES index |
-| MinIO | S3-compatible self-hosted object storage for images |
+| Spring Security + JJWT 0.12 | Stateless JWT authentication, role-based access control |
+| Spring Data JPA + Hibernate 6 | ORM and relational database access |
 | Spring Mail + Thymeleaf | Async HTML email notifications |
 | Spring ApplicationEvent | Decoupled async event bus for booking lifecycle |
-| Bucket4j 8.7 | Token bucket rate limiting per IP |
+| Bucket4j 8.7 | Token bucket rate limiting — 100 req/min per IP |
 | SpringDoc OpenAPI 2.5 | Auto-generated Swagger UI |
-| Docker + Docker Compose | Local infrastructure orchestration |
-| Lombok | Boilerplate reduction |
+| Lombok | Boilerplate reduction (`@Builder`, `@Getter`, etc.) |
 | Maven | Build and dependency management |
+
+### Database & Storage
+
+| Technology | Role |
+|------------|------|
+| PostgreSQL 16 | Primary relational store — users, bookings, reviews |
+| Redis 7 | Response cache (cache-aside) + distributed booking hold (`SETNX`) |
+| Elasticsearch 8.13 | Full-text and filtered property search index |
+| MinIO | S3-compatible self-hosted object storage for property images |
+
+### Analytics & Observability
+
+| Technology | Role |
+|------------|------|
+| Kibana 8.13 | Analytics dashboard over Elasticsearch index |
+| Spring Actuator | Health check endpoint (`/actuator/health`) |
+
+### Infrastructure
+
+| Technology | Role |
+|------------|------|
+| Docker + Docker Compose | Local orchestration — single command starts all services |
+
+> **Frontend:** This is a backend-only project. The API is consumed via Swagger UI (`/swagger-ui/index.html`) or any REST client. A frontend can be built on top of the existing endpoints.
 
 ---
 
