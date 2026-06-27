@@ -30,21 +30,21 @@ The focus is on solving a specific set of backend problems correctly:
 ---
 
 ## Core Features
-
+ 
 | Feature | Description |
 |---------|-------------|
-| JWT Auth + RBAC | Stateless authentication. Roles: `HOST`, `GUEST`, `ADMIN` |
-| Property CRUD | Full lifecycle management with image upload to MinIO |
-| Booking Engine | Conflict detection, state machine (`PENDING → CONFIRMED → CANCELLED`) |
-| Concurrent Hold | Redis-based 30-second distributed hold to prevent double booking |
-| Full-text Search | Elasticsearch with city, price range, guest count, and keyword filters |
-| Response Caching | Redis cache-aside for property reads; invalidated on write |
-| Review System | Post-stay ratings with automatic average recalculation synced to ES index |
-| Email Notifications | Async HTML emails via Spring Events + Thymeleaf on booking lifecycle changes |
-| Analytics | Kibana dashboard over Elasticsearch index — property distribution by city, price |
-| Rate Limiting | Bucket4j token bucket — 100 requests/minute per IP |
-| API Docs | Auto-generated Swagger UI via SpringDoc OpenAPI |
-
+| Auth & Roles | JWT-based login. Three roles: `HOST`, `GUEST`, `ADMIN` |
+| Property Management | Hosts can create, update, delete listings and upload photos |
+| Booking Engine | Date conflict detection, booking states: `PENDING → CONFIRMED → CANCELLED` |
+| Double Booking Prevention | 30-second hold on dates while a guest completes booking |
+| Property Search | Search by city, price, guest count, or keyword |
+| Caching | Property responses cached in Redis; cache cleared on update |
+| Reviews | Guests rate stays (1–5); property average updates automatically |
+| Email Notifications | Automated emails on booking creation and confirmation |
+| Analytics | Kibana dashboard showing property and booking data |
+| Rate Limiting | 100 requests/minute per IP |
+| API Docs | Swagger UI auto-generated at `/swagger-ui/index.html` |
+ 
 ---
 
 ## Architecture
