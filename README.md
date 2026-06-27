@@ -4,12 +4,15 @@
 
 **A property rental backend**
 
+
 ![Java](https://img.shields.io/badge/Java-21-FF6B35?style=flat-square&logo=openjdk&logoColor=white)
 ![Spring Boot](https://img.shields.io/badge/Spring_Boot-3.5-6DB33F?style=flat-square&logo=springboot&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-336791?style=flat-square&logo=postgresql&logoColor=white)
 ![Redis](https://img.shields.io/badge/Redis-7-DC382D?style=flat-square&logo=redis&logoColor=white)
 ![Elasticsearch](https://img.shields.io/badge/Elasticsearch-8.13-005571?style=flat-square&logo=elasticsearch&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker_Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
+
+<p align="center"> <a href="YOUR_YOUTUBE_VIDEO_LINK"> <img src="https://img.shields.io/badge/▶️%20Watch%20Project%20Demo-FF0000?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch Demo"> </a> </p>
 
 </div>
 
@@ -47,118 +50,14 @@ The focus is on solving a specific set of backend problems correctly:
 
 ## Architecture
 
-### System Overview
 
-```
-┌────────────────────────────────────────────────────────────┐
-│                     Client (HTTP)                          │
-└────────────────────────┬───────────────────────────────────┘
-                         │
-                         ▼
-┌────────────────────────────────────────────────────────────┐
-│               Spring Boot Application                      │
-│                                                            │
-│  ┌──────────────┐  ┌──────────────┐  ┌─────────────────┐  │
-│  │ JWT Filter   │→ │ Controllers  │→ │    Services      │  │
-│  │ Rate Limiter │  │ (REST Layer) │  │ (Business Logic) │  │
-│  └──────────────┘  └──────────────┘  └────────┬────────┘  │
-│                                               │            │
-│              ┌────────────────────────────────┤            │
-│              │            │           │       │            │
-│              ▼            ▼           ▼       ▼            │
-│         ┌────────┐  ┌─────────┐ ┌───────┐ ┌──────┐        │
-│         │Postgres│  │  Redis  │ │  ES   │ │MinIO │        │
-│         │  (DB)  │  │(Cache + │ │Search │ │Files │        │
-│         │        │  │  Hold)  │ │ Index │ │      │        │
-│         └────────┘  └─────────┘ └───────┘ └──────┘        │
-│                                                            │
-│         ┌──────────────────────────────────────────┐       │
-│         │  Spring Event Bus (Async)                │       │
-│         │  BookingCreated / BookingConfirmed Events│       │
-│         └──────────────────┬───────────────────────┘       │
-│                            ▼                               │
-│                    ┌──────────────┐                        │
-│                    │ Email Service│                        │
-│                    │(SMTP/Gmail)  │                        │
-│                    └──────────────┘                        │
-└────────────────────────────────────────────────────────────┘
-```
 
-### Booking Flow — Sequence
+### System Overview <p align="center"> <img src="./docs/stayfinder_architecture.png" alt="StayFinder Architecture" width="100%"> </p>
 
-```
-Guest                  API                  Redis              PostgreSQL
-  │                     │                     │                     │
-  │── POST /hold ───────▶                     │                     │
-  │                     │── SETNX hold key ──▶│                     │
-  │                     │◀─ OK (30s TTL) ─────│                     │
-  │◀── 200 Hold placed ─│                     │                     │
-  │                     │                     │                     │
-  │── POST /bookings ───▶                     │                     │
-  │                     │── GET hold key ─────▶                     │
-  │                     │◀─ exists ───────────│                     │
-  │                     │── overlap query ─────────────────────────▶│
-  │                     │◀─ no conflict ───────────────────────────-│
-  │                     │── INSERT booking ────────────────────────▶│
-  │                     │── DEL hold key ─────▶                     │
-  │◀── 201 Created ─────│                     │                     │
-  │                     │                     │                     │
-  │         [async]     │                     │                     │
-  │◀── Booking email ───│                     │                     │
-```
-
----
 
 ## Class Diagram
 
-```
-┌─────────────────┐         ┌──────────────────┐
-│      User       │         │     Property     │
-├─────────────────┤         ├──────────────────┤
-│ id: UUID        │1      * │ id: UUID         │
-│ name: String    ├─────────│ title: String    │
-│ email: String   │  owns   │ city: String     │
-│ password: String│         │ pricePerNight:   │
-│ role: Role      │         │   BigDecimal     │
-└────────┬────────┘         │ maxGuests: int   │
-         │                  │ imageUrls: List  │
-         │ books            │ owner: User      │
-         │ *                └───────┬──────────┘
-┌────────▼────────┐                │ 1
-│     Booking     │                │
-├─────────────────┤                │ has many
-│ id: UUID        │*               ▼
-│ guest: User     │         ┌──────────────────┐
-│ property:       ├─────────│     Review       │
-│   Property      │  for    ├──────────────────┤
-│ checkIn: Date   │         │ id: UUID         │
-│ checkOut: Date  │         │ rating: int      │
-│ totalPrice:     │         │ comment: String  │
-│   BigDecimal    │         │ guest: User      │
-│ status:         │         │ property:        │
-│  BookingStatus  │         │   Property       │
-└────────┬────────┘         └──────────────────┘
-         │
-         │ tracks
-         ▼
-┌─────────────────────┐       ┌──────────────────┐
-│ BookingStatusHistory│       │  BookingStatus   │
-├─────────────────────┤       ├──────────────────┤
-│ id: UUID            │       │  PENDING         │
-│ booking: Booking    │       │  CONFIRMED       │
-│ status:             │       │  CANCELLED       │
-│  BookingStatus      │       └──────────────────┘
-│ changedAt: Instant  │
-└─────────────────────┘
-
-┌──────────────┐
-│     Role     │
-├──────────────┤
-│  HOST        │
-│  GUEST       │
-│  ADMIN       │
-└──────────────┘
-```
+<p align="center"> <img src="./docs/stayfinder_uml_class_diagram.svg" alt="StayFinder UML Class Diagram" width="100%"> </p>
 ## Tech Stack
 
 ### Backend
