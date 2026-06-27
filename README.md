@@ -11,8 +11,6 @@
 ![Elasticsearch](https://img.shields.io/badge/Elasticsearch-8.13-005571?style=flat-square&logo=elasticsearch&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker_Compose-2496ED?style=flat-square&logo=docker&logoColor=white)
 
-[Quick Start](#-setup) · [API Reference](#-api-endpoints) · [Architecture](#️-architecture) · [Challenges](#-technical-challenges)
-
 </div>
 
 ---
