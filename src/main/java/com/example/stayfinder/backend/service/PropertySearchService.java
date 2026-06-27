@@ -1,15 +1,15 @@
 package com.example.stayfinder.backend.service;
 
-import co.elastic.clients.elasticsearch.ElasticsearchClient;
-import co.elastic.clients.elasticsearch._types.query_dsl.*;
-import co.elastic.clients.elasticsearch.core.SearchResponse;
-import co.elastic.clients.elasticsearch.core.search.Hit;
 import com.example.stayfinder.backend.document.PropertyDocument;
 import com.example.stayfinder.backend.repository.PropertySearchRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.SearchHit;
+import org.springframework.data.elasticsearch.core.query.Criteria;
+import org.springframework.data.elasticsearch.core.query.CriteriaQuery;
 import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
-import java.util.*;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
 public class PropertySearchService {
 
     private final PropertySearchRepository searchRepository;
-    private final ElasticsearchClient elasticsearchClient;
+    private final ElasticsearchOperations elasticsearchOperations;
 
     public void indexProperty(PropertyDocument document) {
         searchRepository.save(document);
@@ -38,82 +38,45 @@ public class PropertySearchService {
             Integer minGuests,
             String keyword) {
 
-        try {
-            BoolQuery.Builder boolQuery = new BoolQuery.Builder();
+        Criteria criteria = new Criteria();
 
-            // Filter by city
-            if (city != null && !city.isBlank()) {
-                boolQuery.filter(f -> f
-                        .term(t -> t
-                                .field("city")
-                                .value(city)
-                        )
-                );
-            }
-
-            // Filter by min price
-            if (minPrice != null) {
-                boolQuery.filter(f -> f
-                        .range(r -> r
-                                .number(n -> n
-                                        .field("pricePerNight")
-                                        .gte(minPrice.doubleValue())
-                                )
-                        )
-                );
-            }
-
-            // Filter by max price
-            if (maxPrice != null) {
-                boolQuery.filter(f -> f
-                        .range(r -> r
-                                .number(n -> n
-                                        .field("pricePerNight")
-                                        .lte(maxPrice.doubleValue())
-                                )
-                        )
-                );
-            }
-
-            // Filter by minimum guests
-            if (minGuests != null) {
-                boolQuery.filter(f -> f
-                        .range(r -> r
-                                .number(n -> n
-                                        .field("maxGuests")
-                                        .gte(minGuests.doubleValue())
-                                )
-                        )
-                );
-            }
-
-            // Full text search on title and description
-            if (keyword != null && !keyword.isBlank()) {
-                boolQuery.must(m -> m
-                        .multiMatch(mm -> mm
-                                .fields("title", "description")
-                                .query(keyword)
-                        )
-                );
-            }
-
-            SearchResponse<PropertyDocument> response =
-                    elasticsearchClient.search(s -> s
-                                    .index("properties")
-                                    .query(q -> q
-                                            .bool(boolQuery.build())
-                                    ),
-                            PropertyDocument.class
-                    );
-
-            return response.hits().hits().stream()
-                    .map(Hit::source)
-                    .filter(Objects::nonNull)
-                    .collect(Collectors.toList());
-
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Search failed: " + e.getMessage());
+        if (city != null && !city.isBlank()) {
+            criteria = criteria.and(
+                    new Criteria("city").is(city));
         }
+
+        if (minPrice != null) {
+            criteria = criteria.and(
+                    new Criteria("pricePerNight")
+                            .greaterThanEqual(minPrice.doubleValue()));
+        }
+
+        if (maxPrice != null) {
+            criteria = criteria.and(
+                    new Criteria("pricePerNight")
+                            .lessThanEqual(maxPrice.doubleValue()));
+        }
+
+        if (minGuests != null) {
+            criteria = criteria.and(
+                    new Criteria("maxGuests")
+                            .greaterThanEqual(minGuests));
+        }
+
+        if (keyword != null && !keyword.isBlank()) {
+            Criteria titleMatch =
+                    new Criteria("title").contains(keyword);
+            Criteria descMatch =
+                    new Criteria("description").contains(keyword);
+            criteria = criteria.and(titleMatch.or(descMatch));
+        }
+
+        CriteriaQuery query = new CriteriaQuery(criteria);
+
+        return elasticsearchOperations
+                .search(query, PropertyDocument.class)
+                .stream()
+                .map(SearchHit::getContent)
+                .collect(Collectors.toList());
     }
 }

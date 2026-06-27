@@ -18,18 +18,14 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
-import java.util.logging.Logger;
 
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
 public class PropertyService {
-
-    private static final Logger log = Logger.getLogger(PropertyService.class.getName());
 
     private final PropertyRepository repository;
     private final UserRepository userRepository;
@@ -37,13 +33,12 @@ public class PropertyService {
     private final PropertySearchService searchService;
 
     @Transactional
-    public PropertyResponse create(PropertyRequest req, UUID currentUserId) {
-        // Owner is always the authenticated caller — never trust a client-supplied ownerId.
-        User owner = userRepository.findById(currentUserId)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException("User not found: " + currentUserId));
+    public PropertyResponse create(PropertyRequest req, UUID ownerId) {
+        User owner = userRepository.findById(ownerId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "User not found: " + ownerId));
 
-        Property property = Property.builder()
+        Property p = Property.builder()
                 .title(req.getTitle())
                 .description(req.getDescription())
                 .city(req.getCity())
@@ -53,10 +48,8 @@ public class PropertyService {
                 .owner(owner)
                 .build();
 
-        Property saved = repository.save(property);
-
+        Property saved = repository.save(p);
         searchService.indexProperty(toDocument(saved));
-
         return toResponse(saved);
     }
 
@@ -67,123 +60,112 @@ public class PropertyService {
 
     @Cacheable(value = "properties", key = "#id")
     public PropertyResponse getById(UUID id) {
+        System.out.println("Fetching from DATABASE: " + id);
         return repository.findById(id)
                 .map(this::toResponse)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException("Property not found: " + id));
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Property not found: " + id));
     }
 
     @Transactional
     @CachePut(value = "properties", key = "#id")
-    public PropertyResponse update(UUID id, PropertyRequest req, UUID currentUserId) {
-        Property property = findOwnedPropertyOrThrow(id, currentUserId);
+    public PropertyResponse update(UUID id, PropertyRequest req, UUID ownerId) {
+        Property p = findOwnedPropertyOrThrow(id, ownerId);
 
-        property.setTitle(req.getTitle());
-        property.setDescription(req.getDescription());
-        property.setCity(req.getCity());
-        property.setCountry(req.getCountry());
-        property.setPricePerNight(req.getPricePerNight());
-        property.setMaxGuests(req.getMaxGuests());
+        p.setTitle(req.getTitle());
+        p.setDescription(req.getDescription());
+        p.setCity(req.getCity());
+        p.setCountry(req.getCountry());
+        p.setPricePerNight(req.getPricePerNight());
+        p.setMaxGuests(req.getMaxGuests());
 
-        Property saved = repository.save(property);
-
+        Property saved = repository.save(p);
         searchService.indexProperty(toDocument(saved));
-
         return toResponse(saved);
     }
 
     @Transactional
     @CacheEvict(value = "properties", key = "#id")
-    public void delete(UUID id, UUID currentUserId) {
-        Property property = findOwnedPropertyOrThrow(id, currentUserId);
-
-        repository.delete(property);
-
+    public void delete(UUID id, UUID ownerId) {
+        Property p = findOwnedPropertyOrThrow(id, ownerId);
+        repository.delete(p);
         searchService.deleteProperty(id.toString());
     }
 
     @Transactional
-    public PropertyResponse uploadImage(UUID id, MultipartFile file, UUID currentUserId) {
-        Property property = findOwnedPropertyOrThrow(id, currentUserId);
+    public PropertyResponse uploadImage(UUID id, MultipartFile file,
+                                        UUID ownerId) {
+        Property p = findOwnedPropertyOrThrow(id, ownerId);
 
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("Uploaded file is empty");
         }
         String contentType = file.getContentType();
         if (contentType == null || !contentType.startsWith("image/")) {
-            throw new IllegalArgumentException("Only image uploads are allowed");
+            throw new IllegalArgumentException(
+                    "Only image uploads are allowed");
         }
 
         try {
             String url = minioService.uploadFile(file);
-
-            if (property.getImageUrls() == null) {
-                property.setImageUrls(new ArrayList<>());
+            if (p.getImageUrls() == null) {
+                p.setImageUrls(new ArrayList<>());
             }
-            property.getImageUrls().add(url);
-
-            Property saved = repository.save(property);
-
+            p.getImageUrls().add(url);
+            Property saved = repository.save(p);
             searchService.indexProperty(toDocument(saved));
-
             return toResponse(saved);
-
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {
-            throw new RuntimeException("Image upload failed: " + e.getMessage(), e);
+            throw new RuntimeException(
+                    "Image upload failed: " + e.getMessage(), e);
         }
     }
 
-    /**
-     * Loads a property and verifies the current user owns it.
-     * Throws ResourceNotFoundException if missing, AccessDeniedException if not owned.
-     */
-    private Property findOwnedPropertyOrThrow(UUID propertyId, UUID currentUserId) {
-        Property property = repository.findById(propertyId)
-                .orElseThrow(() ->
-                        new ResourceNotFoundException("Property not found: " + propertyId));
-
-        if (!property.getOwner().getId().equals(currentUserId)) {
-            throw new AccessDeniedException("You do not own this property");
+    private Property findOwnedPropertyOrThrow(UUID propertyId,
+                                              UUID ownerId) {
+        Property p = repository.findById(propertyId)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Property not found: " + propertyId));
+        if (!p.getOwner().getId().equals(ownerId)) {
+            throw new AccessDeniedException(
+                    "You do not own this property");
         }
-
-        return property;
+        return p;
     }
 
-    private PropertyResponse toResponse(Property property) {
+    private PropertyResponse toResponse(Property p) {
         List<String> images = new ArrayList<>();
-        if (property.getImageUrls() != null) {
-            images.addAll(property.getImageUrls());
+        if (p.getImageUrls() != null) {
+            images.addAll(p.getImageUrls());
         }
-
         return PropertyResponse.builder()
-                .id(property.getId())
-                .title(property.getTitle())
-                .description(property.getDescription())
-                .city(property.getCity())
-                .country(property.getCountry())
-                .pricePerNight(property.getPricePerNight())
-                .maxGuests(property.getMaxGuests())
-                .createdAt(property.getCreatedAt())
+                .id(p.getId())
+                .title(p.getTitle())
+                .description(p.getDescription())
+                .city(p.getCity())
+                .country(p.getCountry())
+                .pricePerNight(p.getPricePerNight())
+                .maxGuests(p.getMaxGuests())
+                .createdAt(p.getCreatedAt())
                 .imageUrls(images)
                 .build();
     }
 
-    private PropertyDocument toDocument(Property property) {
+    private PropertyDocument toDocument(Property p) {
         List<String> images = new ArrayList<>();
-        if (property.getImageUrls() != null) {
-            images.addAll(property.getImageUrls());
+        if (p.getImageUrls() != null) {
+            images.addAll(p.getImageUrls());
         }
-
         return PropertyDocument.builder()
-                .id(property.getId().toString())
-                .title(property.getTitle())
-                .description(property.getDescription())
-                .city(property.getCity())
-                .country(property.getCountry())
-                .pricePerNight(property.getPricePerNight())
-                .maxGuests(property.getMaxGuests())
+                .id(p.getId().toString())
+                .title(p.getTitle())
+                .description(p.getDescription())
+                .city(p.getCity())
+                .country(p.getCountry())
+                .pricePerNight(p.getPricePerNight())
+                .maxGuests(p.getMaxGuests())
                 .avgRating(0.0)
                 .imageUrls(images)
                 .build();

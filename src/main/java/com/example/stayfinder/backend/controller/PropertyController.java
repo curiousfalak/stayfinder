@@ -2,7 +2,7 @@ package com.example.stayfinder.backend.controller;
 
 import com.example.stayfinder.backend.dto.PropertyRequest;
 import com.example.stayfinder.backend.dto.PropertyResponse;
-import com.example.stayfinder.backend.security.CustomUserDetails; // adjust to your actual principal class
+import com.example.stayfinder.backend.security.CustomUserDetails;
 import com.example.stayfinder.backend.service.PropertyService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -15,7 +15,6 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
-
 import java.util.UUID;
 
 @RestController
@@ -64,12 +63,13 @@ public class PropertyController {
         return ResponseEntity.noContent().build();
     }
 
-    @PostMapping("/{id}/images")
+    @PostMapping(value = "/{id}/images", consumes = "multipart/form-data")
     @PreAuthorize("hasRole('HOST')")
     public ResponseEntity<PropertyResponse> uploadImage(
             @PathVariable UUID id,
             @RequestParam("file") MultipartFile file,
             @AuthenticationPrincipal CustomUserDetails principal) {
-        return ResponseEntity.ok(service.uploadImage(id, file, principal.getId()));
+        return ResponseEntity.ok(
+                service.uploadImage(id, file, principal.getId()));
     }
 }

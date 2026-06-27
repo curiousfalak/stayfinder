@@ -27,6 +27,5 @@ public class PropertyRequest {
 
     @Min(value = 1, message = "Must allow at least 1 guest")
     private int maxGuests;
-    @NotNull(message = "Owner ID is required")
-    private UUID ownerId;
+
 }
